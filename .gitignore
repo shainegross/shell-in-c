@@ -1,0 +1,9 @@
+*.o
+*.out
+*.log
+*.swp
+a.out
+mysh
+test_shell
+output.txt
+test_*.txt
