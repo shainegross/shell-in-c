@@ -1,36 +1,71 @@
+#define _POSIX_C_SOURCE 200809L
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <fcntl.h>
-#include "../include/utils.h"
+#include <unistd.h>
+#include <termios.h>
+#include <time.h>
+#include <errno.h>
+#include "../include/shell.h"
+
+struct JobTable job_table;
 
 
 int main() {
+    // Initialize JobTable
+    job_table.job_count = 0;
+    job_table.next_job_id = 1;
 
-    struct Pipeline *pipeline = malloc(sizeof(struct Pipeline));
-    pipeline->pipe_count = 0;
-    initialze_Command(&pipeline->commands[0]);
-    int pipes[MAX_COMMANDS - 1][2];  
-    pid_t child_pids[MAX_COMMANDS];  // Store child PIDs
+    // Signal handling
+    // handle SIGINT and SIGTSTP
+    struct sigaction sa;
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;  
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTSTP, &sa, NULL);
+
+    // handle SIGCHILD
+    sa.sa_handler = sigchld_handler;
+    sa.sa_flags = SA_RESTART; 
+    sigaction(SIGCHLD, &sa, NULL); 
+
+    // Prevent background processes from writing and reading to terminal
+    sigaction(SIGTTOU, &sa, NULL);  
+    sigaction(SIGTTIN, &sa, NULL); 
 
     while(1){
+        // Cleanup finished jobs before processing new input
+        cleanup_finished_jobs(&job_table);
+
+        // Initialize pipeline
+        struct Pipeline *pipeline = malloc(sizeof(struct Pipeline));
+        pipeline->pipe_count = 0;
+        initialze_Command(&pipeline->commands[0]);
+
+        int pipes[MAX_COMMANDS - 1][2];  
+        pid_t child_pids[MAX_COMMANDS];  // Store child PIDs
+
         char *input = NULL;
         size_t len = 0;
+
+        int input_has_background_process = 0;
 
         printf("mysh> ");
         fflush(stdout);
 
-        // Read a line of input
-        if(getline(&input, &len, stdin) == -1) {
+        // Read a line of input; SA_RESTART should handle EINTR automatically
+        if(getline(&input, &len, stdin) == -1 || input[0] == '\n') {
             printf("\n");
             break;
         }
         input[strcspn(input, "\n")] = 0;
 
-        parse_input(input, pipeline);
+        parse_input(input, pipeline, &input_has_background_process);        
         
         // Create pipes if needed (for pipe_count > 0, we need pipe_count pipes)
         if(pipeline->pipe_count > 0) {
@@ -49,50 +84,30 @@ int main() {
             struct Command *cmd = &pipeline->commands[i];
             if (cmd->argv[0] == NULL) continue; 
             if (strncmp(cmd->argv[0], "exit", 4) == 0) {
-                should_exit = 1;
+                should_exit = 1; //set flag for outer loop
                 break;
             }
 
             // handle built-in commands
-            //cd command
-            if (strcmp(cmd->argv[0], "cd") == 0) {
-                if (cmd->argv[1] == NULL) fprintf(stderr, "cd: missing argument\n");
-                else if (chdir(cmd->argv[1]) != 0) perror("cd failed");
+            if (process_built_in_command(cmd) == 1) continue;
 
-                // Successfully changed directory - show current path
-                else {
-                    char cwd[MAX_INPUT_SIZE];
-                    if (getcwd(cwd, sizeof(cwd)) != NULL) printf("%s\n", cwd);
-                    else perror("getcwd failed");
-                }
-                continue;
-            }
+            // check and handle job commands
+            if (process_job_command(cmd, &job_table) == 1) continue;
 
-            //pwd command
-            if (strcmp(cmd->argv[0], "pwd") == 0) {
-                char cwd[MAX_INPUT_SIZE];
-                if (getcwd(cwd, sizeof(cwd)) != NULL) printf("%s\n", cwd);
-                else perror("pwd failed");
-                continue;
-            }
-
-            //help command
-            if (strcmp(cmd->argv[0], "help") == 0) {
-                printf("Available commands:\n");
-                printf("   cd <directory> - Change directory\n");
-                printf("   pwd - Print working directory\n");
-                printf("   exit - Exit the shell\n");
-                printf("   [other] Runs system command like ls, mkdir, echo, etc.\n");
-                continue;
-            }
-
-
-            // fork and execute commands
+            // it's a regular command. fork
             pid_t pid = fork();
             if (pid < 0) perror("fork failed");
             
             //Child process
             if (pid == 0) { 
+                // Restore default signal handling for children
+                struct sigaction sa_default;
+                sa_default.sa_handler = SIG_DFL;
+                sigemptyset(&sa_default.sa_mask);
+                sa_default.sa_flags = 0;
+                sigaction(SIGINT, &sa_default, NULL);
+                sigaction(SIGTSTP, &sa_default, NULL);
+
                 // Handle input redirection
                 if (cmd->redirect_flags & REDIRECT_IN) {
                     int fd = open(cmd->redirects.input_file, O_RDONLY);
@@ -113,31 +128,48 @@ int main() {
                     close(fd);
                 }
 
+                // Handle pipes
                 if(pipeline->pipe_count > 0) {
-                    // Handle pipes
                     if (i > 0)
                         dup2(pipes[i - 1][0], STDIN_FILENO); // Read end of previous pipe
                     if (i < pipeline->pipe_count) 
                         dup2(pipes[i][1], STDOUT_FILENO); // Write end of current pipe
                     
-                    // Close ALL pipe descriptors in child
+                    // Close all pipe descriptors in child
                     for (int j = 0; j < pipeline->pipe_count; j++) {
                         close(pipes[j][0]);
                         close(pipes[j][1]);
                     }
                 }
+
+                if (pipeline->pipe_count > 0 || input_has_background_process) 
+                    if (i == 0) setpgid(0, 0);  // Create new process group
+            
                 execvp(cmd->argv[0], cmd->argv);
-                perror("exec failed");
-                exit(1);
+                // If execvp returns, it failed
+                fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
+                exit(127);  // Standard exit code for "command not found"
+
             } else {
-                // Parent process - store child PID
+                // Parent Process
+                // Set pgid for job control only when needed
+                if (pipeline->pipe_count > 0 || input_has_background_process) {
+                    if (i == 0) {
+                        setpgid(pid, pid);  
+                    } else {
+                        setpgid(pid, child_pids[0]); 
+                    }
+                }
+
+                //store child PIDs
                 child_pids[child_count++] = pid;
             }
         }
         
-        // Check if we should exit the shell
+        // handle exit in outer loop
         if (should_exit) {
             free(input);
+            free(pipeline);
             break;
         }
     
@@ -148,18 +180,80 @@ int main() {
                 close(pipes[i][1]);
             }
         }
-        
-        // Wait for all child processes
-        for (int i = 0; i < child_count; i++) {
-            int status;
-            waitpid(child_pids[i], &status, 0);
+
+        if (child_count > 0) {
+            if(createJob(&job_table, input, &input_has_background_process, child_pids, child_count) == -1) {
+                for (int i = 0; i < child_count; i++) {
+                    int status;
+                    waitpid(child_pids[i], &status, 0);
+                }
+                break;
+            }
+
+            struct Job *job = &job_table.jobs[job_table.job_count - 1];
+
+            if (job->is_background) {
+                // Background job (simple or pipeline) - print info, don't wait
+                printf("[%d] %ld\n", job->job_id, (long)job->pids[0]);
+                fflush(stdout);
+            } 
+            // Simple foreground command - no process group change needed; must wait for it
+            else if (pipeline->pipe_count == 0) {
+                for (int i = 0; i < child_count; i++) {
+                    int status;
+                    waitpid(child_pids[i], &status, 0);
+                    job->pid_status[i] = 0; 
+                }
+                job->state = JOB_DONE;
+
+            } else {
+                // Foreground pipeline - use process group and wait
+                tcsetpgrp(STDIN_FILENO, job->pids[0]);
+            
+                // Block SIGCHLD to prevent race condition with signal handler
+                sigset_t mask, oldmask;
+                sigemptyset(&mask);
+                sigaddset(&mask, SIGCHLD);
+                sigprocmask(SIG_BLOCK, &mask, &oldmask);
+            
+                // Pipeline - wait for process group 
+                int status;
+                waitpid(-job->pids[0], &status, 0);  // Wait for process group
+            
+                // Restore signal mask
+                sigprocmask(SIG_SETMASK, &oldmask, NULL);
+                
+                // Only restore terminal control if we changed it
+                // Small delay to ensure process group is fully cleaned up
+                struct timespec ts = {0, 1000000};  // 1 millisecond
+                nanosleep(&ts, NULL);                
+                
+                pid_t shell_pg = getpgrp();
+                
+                // Block SIGTTOU temporarily
+                sigset_t tto_mask, old_tto_mask;
+                sigemptyset(&tto_mask);
+                sigaddset(&tto_mask, SIGTTOU);
+                sigprocmask(SIG_BLOCK, &tto_mask, &old_tto_mask);
+
+                // Attempt to set the terminal's foreground process group
+                tcsetpgrp(STDIN_FILENO, shell_pg);
+
+                // Restore the original signal mask
+                sigprocmask(SIG_SETMASK, &old_tto_mask, NULL);
+                
+                job->state = JOB_DONE;
+                for (int i = 0; i < child_count; i++) 
+                    job->pid_status[i] = 0;  
+            }
         }
 
         free(input);
+        
         for (int i = 0; i <= pipeline->pipe_count; i++)
             initialze_Command(&pipeline->commands[i]);
         pipeline->pipe_count = 0;
-
+        
+        free(pipeline);
     }
-    free(pipeline);
 }

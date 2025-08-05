@@ -152,6 +152,68 @@ fi
 TESTS_RUN=$((TESTS_RUN + 1))
 echo
 
+# Test background jobs
+echo -e "${YELLOW}Test: Background Job Creation${NC}"
+TESTS_RUN=$((TESTS_RUN + 1))
+
+# Run a background job and check for job notification
+output=$(echo "sleep 1 &" | timeout 3s ./mysh 2>&1)
+if echo "$output" | grep -q "\[.*\].*[0-9]\+"; then
+    echo -e "${GREEN}✓ PASS - Background job notification displayed${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo "Output: $output"
+else
+    echo -e "${RED}✗ FAIL - No background job notification${NC}"
+    echo "Output: $output"
+fi
+echo
+
+# Test background job detection
+echo -e "${YELLOW}Test: Background Process Detection${NC}"
+TESTS_RUN=$((TESTS_RUN + 1))
+
+# Test that shell doesn't wait for background jobs
+start_time=$(date +%s)
+echo "sleep 2 &" | timeout 5s ./mysh >/dev/null 2>&1
+end_time=$(date +%s)
+duration=$((end_time - start_time))
+
+if [ $duration -lt 2 ]; then
+    echo -e "${GREEN}✓ PASS - Shell returned immediately for background job${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo "Duration: ${duration}s (should be < 2s)"
+else
+    echo -e "${RED}✗ FAIL - Shell waited for background job${NC}"
+    echo "Duration: ${duration}s (should be < 2s)"
+fi
+echo
+
+# Test foreground vs background behavior
+echo -e "${YELLOW}Test: Foreground vs Background Job Behavior${NC}"
+TESTS_RUN=$((TESTS_RUN + 1))
+
+# Foreground should block
+start_time=$(date +%s)
+echo "sleep 1" | timeout 3s ./mysh >/dev/null 2>&1
+end_time=$(date +%s)
+fg_duration=$((end_time - start_time))
+
+# Background should not block
+start_time=$(date +%s)
+echo "sleep 1 &" | timeout 3s ./mysh >/dev/null 2>&1
+end_time=$(date +%s)
+bg_duration=$((end_time - start_time))
+
+if [ $fg_duration -ge 1 ] && [ $bg_duration -lt 1 ]; then
+    echo -e "${GREEN}✓ PASS - Foreground blocks, background doesn't${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo "Foreground duration: ${fg_duration}s, Background duration: ${bg_duration}s"
+else
+    echo -e "${RED}✗ FAIL - Incorrect blocking behavior${NC}"
+    echo "Foreground duration: ${fg_duration}s, Background duration: ${bg_duration}s"
+fi
+echo
+
 # Cleanup
 rm -f test_input.txt test_data.txt test_lines.txt test_output.txt test_append.txt test_fruits.txt test_grep_output.txt
 rm -rf test_dir

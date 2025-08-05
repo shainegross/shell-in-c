@@ -1,7 +1,8 @@
-Complete shell implementation with tests
+Complete shell implementation written in C
 
-- Basic shell written in C with readline support
 - Built-in commands: cd, pwd, exit
 - I/O redirection: <, >, >>
 - Pipe support: single and multiple pipes
-- Comprehensive test suite with integration tests
+- Background & Foreground Processes 
+- Signal Haneling
+- Unit and integration tests
