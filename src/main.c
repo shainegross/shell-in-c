@@ -14,29 +14,38 @@
 
 struct JobTable job_table;
 
+// Manage Variables (both local and environment)
+extern char **environ;          // Original environment variables
+struct VariableStore var_store; // Store for shell variables
 
 int main() {
+    // Initialize variable store (includes environment variables)
+    if (init_variable_store(&var_store) < 0) {
+        fprintf(stderr, "Failed to initialize variable store\n");
+        return 1;
+    }
+    
     // Initialize JobTable
     job_table.job_count = 0;
     job_table.next_job_id = 1;
 
     // Signal handling
-    // handle SIGINT and SIGTSTP
-    struct sigaction sa;
-    sa.sa_handler = SIG_IGN;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;  
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTSTP, &sa, NULL);
+        // handle SIGINT and SIGTSTP
+        struct sigaction sa;
+        sa.sa_handler = SIG_IGN;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;  
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTSTP, &sa, NULL);
 
-    // handle SIGCHILD
-    sa.sa_handler = sigchld_handler;
-    sa.sa_flags = SA_RESTART; 
-    sigaction(SIGCHLD, &sa, NULL); 
+        // handle SIGCHILD
+        sa.sa_handler = sigchld_handler;
+        sa.sa_flags = SA_RESTART; 
+        sigaction(SIGCHLD, &sa, NULL); 
 
-    // Prevent background processes from writing and reading to terminal
-    sigaction(SIGTTOU, &sa, NULL);  
-    sigaction(SIGTTIN, &sa, NULL); 
+        // Prevent background processes from writing and reading to terminal
+        sigaction(SIGTTOU, &sa, NULL);  
+        sigaction(SIGTTIN, &sa, NULL); 
 
     while(1){
         // Cleanup finished jobs before processing new input
@@ -65,6 +74,7 @@ int main() {
         }
         input[strcspn(input, "\n")] = 0;
 
+        printf("DEBUG: Raw input after getline: '%s'\n", input);
         parse_input(input, pipeline, &input_has_background_process);        
         
         // Create pipes if needed (for pipe_count > 0, we need pipe_count pipes)
@@ -89,7 +99,8 @@ int main() {
             }
 
             // handle built-in commands
-            if (process_built_in_command(cmd) == 1) continue;
+            int builtin_result = process_built_in_command(cmd);
+            if (builtin_result == 0 || builtin_result == -1) continue;  // Built-in found (success or error)
 
             // check and handle job commands
             if (process_job_command(cmd, &job_table) == 1) continue;
@@ -144,9 +155,25 @@ int main() {
 
                 if (pipeline->pipe_count > 0 || input_has_background_process) 
                     if (i == 0) setpgid(0, 0);  // Create new process group
-            
-                execvp(cmd->argv[0], cmd->argv);
-                // If execvp returns, it failed
+                
+                // Build environment array for child process
+                char **child_env = build_environ_array(&var_store);
+                if (child_env == NULL) {
+                    fprintf(stderr, "Failed to build environment for child process\n");
+                    exit(1);
+                }
+                //char **child_env = environ;  // Use original environment for testing
+                                
+                // Identify path to executable
+                printf("DEBUG: Looking for command: '%s'\n", cmd->argv[0]);
+                char *full_path = find_executable_in_path(cmd->argv[0], &var_store);
+                if (full_path == NULL) {
+                    fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
+                    exit(127);
+                }
+                printf("DEBUG: Found full path: '%s'\n", full_path);
+                execve(full_path, cmd->argv, child_env);
+    
                 fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
                 exit(127);  // Standard exit code for "command not found"
 
@@ -256,4 +283,6 @@ int main() {
         
         free(pipeline);
     }
+    
+    free_variable_store(&var_store);
 }

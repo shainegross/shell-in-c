@@ -10,7 +10,8 @@ SRCS = $(SRC_DIR)/main.c \
 	   $(SRC_DIR)/parser.c \
 	   $(SRC_DIR)/builtin.c \
 	   $(SRC_DIR)/jobs.c \
-	   $(SRC_DIR)/signals.c
+	   $(SRC_DIR)/signals.c\
+	   $(SRC_DIR)/vars.c 
 
 CFLAGS = -Wall -I$(INC_DIR)
 DEBUG_CFLAGS = -Wall -I$(INC_DIR) -g -O0
@@ -47,11 +48,20 @@ integration-tests: $(INTEGRATION_TEST) $(TARGET)
 $(INTEGRATION_TEST): $(TEST_DIR)/test_integrated.c
 	$(CC) $(TEST_CFLAGS) -o $@ $<
 
-# Run all tests
-full-tests: unit-tests integration-tests
-	@echo "=== All Tests Completed ==="
+# Run all basic tests
+all-tests: unit-tests integration-tests
+	@echo "=== All Core Tests Completed ==="
 
-# Individual test categories
+# Run comprehensive tests (advanced scenarios)
+comprehensive-tests: $(TARGET)
+	@echo "=== Running Comprehensive Test Suite ==="
+	./tests/test_comprehensive.sh
+
+# Run all tests including comprehensive
+full-tests: all-tests comprehensive-tests
+	@echo "=== All Tests (Core + Comprehensive) Completed ==="
+
+# Individual test categories (for debugging specific functionality)
 test-pipes: $(INTEGRATION_TEST) $(TARGET)
 	@echo "=== Testing Pipe Functionality ==="
 	./$(INTEGRATION_TEST) | grep -E "(pipe|Pipeline)"
@@ -63,6 +73,10 @@ test-background: $(INTEGRATION_TEST) $(TARGET)
 test-redirection: $(INTEGRATION_TEST) $(TARGET)
 	@echo "=== Testing Redirection Functionality ==="
 	./$(INTEGRATION_TEST) | grep -E "(redirection|Redirection)"
+
+test-variables: $(INTEGRATION_TEST) $(TARGET)
+	@echo "=== Testing Variable Functionality ==="
+	./$(INTEGRATION_TEST) | grep -E "(variable|Variable)"
 
 test-job-control: $(INTEGRATION_TEST) $(TARGET)
 	@echo "=== Testing Job Control Functionality ==="
@@ -83,9 +97,11 @@ clean:
 	rm -f $(TARGET)
 	rm -f $(UNIT_TEST) $(INTEGRATION_TEST)
 	rm -f $(SRC_DIR)/*.o
-	rm -f *.o *.log *.txt *.sh
-	rm -f test_input.txt test_output.txt test_append.txt
-	rm -f test_shell_output.txt shell_strace.log
+	rm -f *.o *.log *.txt *.sh *.tmp *.out *.app
+	rm -f test_*.txt test_*.sh
+	rm -f *var*.txt *var*.sh
+	rm -f comprehensive_*.txt comprehensive_*.sh
+	rm -f shell_strace.log
 
 # Help target
 help:

@@ -50,9 +50,31 @@ struct TestResult test_result = {0, 0, NULL};
 
 // Helper functions
 void cleanup_test_files(void) {
+    // Basic test files
     unlink("test_input.txt");
     unlink("test_output.txt");
     unlink("test_append.txt");
+    unlink("test_shell_output.txt");
+    unlink("test_script.sh");
+    
+    // Variable test files
+    unlink("env_var_test.sh");
+    unlink("env_var_output.txt");
+    unlink("local_var_test.sh");
+    unlink("local_var_output.txt");
+    unlink("var_pipe_test.sh");
+    unlink("var_pipe_output.txt");
+    unlink("var_redir_test.sh");
+    unlink("var_redir_output.txt");
+    unlink("var_test_output.txt");
+    unlink("escaped_var_test.sh");
+    unlink("escaped_var_output.txt");
+    unlink("undef_var_test.sh");
+    unlink("undef_var_output.txt");
+    
+    // Any other potential test artifacts
+    unlink("*.log");
+    unlink("*.tmp");
 }
 
 int run_shell_command(const char *command, int timeout_seconds) {
@@ -359,6 +381,181 @@ void test_stress_multiple_pipes(void) {
     TEST_PASS();
 }
 
+void test_env_variable_expansion(void) {
+    TEST_START("Environment variable expansion");
+    
+    FILE *script = fopen("env_var_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "export TESTVAR=hello_world\n");
+    fprintf(script, "echo $TESTVAR\n");
+    fprintf(script, "echo prefix_$(TESTVAR)_suffix\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("env_var_test.sh", 0755);
+    int result = system("./env_var_test.sh > env_var_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Environment variable test failed");
+    
+    char *output = read_file_content("env_var_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read env variable test output");
+    ASSERT_TRUE(strstr(output, "hello_world") != NULL, "Variable expansion failed");
+    ASSERT_TRUE(strstr(output, "prefix_hello_world_suffix") != NULL, "Parentheses variable expansion failed");
+    
+    free(output);
+    unlink("env_var_test.sh");
+    unlink("env_var_output.txt");
+    TEST_PASS();
+}
+
+void test_local_variable_expansion(void) {
+    TEST_START("Local variable expansion");
+    
+    FILE *script = fopen("local_var_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "set LOCALVAR local_value\n");
+    fprintf(script, "echo $LOCALVAR\n");
+    fprintf(script, "echo test_$(LOCALVAR)_end\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("local_var_test.sh", 0755);
+    int result = system("./local_var_test.sh > local_var_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Local variable test failed");
+    
+    char *output = read_file_content("local_var_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read local variable test output");
+    ASSERT_TRUE(strstr(output, "local_value") != NULL, "Local variable expansion failed");
+    ASSERT_TRUE(strstr(output, "test_local_value_end") != NULL, "Local variable parentheses expansion failed");
+    
+    free(output);
+    unlink("local_var_test.sh");
+    unlink("local_var_output.txt");
+    TEST_PASS();
+}
+
+void test_variable_in_pipe(void) {
+    TEST_START("Variable expansion in pipes");
+    
+    FILE *script = fopen("var_pipe_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "export PATTERN=test\n");
+    fprintf(script, "echo 'test line 1\\nother line\\ntest line 2' | grep $PATTERN\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("var_pipe_test.sh", 0755);
+    int result = system("./var_pipe_test.sh > var_pipe_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Variable in pipe test failed");
+    
+    char *output = read_file_content("var_pipe_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read variable pipe test output");
+    ASSERT_TRUE(strstr(output, "test line 1") != NULL, "Variable expansion in pipe failed");
+    ASSERT_TRUE(strstr(output, "test line 2") != NULL, "Variable expansion in pipe failed");
+    
+    free(output);
+    unlink("var_pipe_test.sh");
+    unlink("var_pipe_output.txt");
+    TEST_PASS();
+}
+
+void test_variable_in_redirection(void) {
+    TEST_START("Variable expansion in redirection");
+    
+    FILE *script = fopen("var_redir_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "export OUTFILE=var_test_output.txt\n");
+    fprintf(script, "echo 'variable redirection test' > $(OUTFILE)\n");
+    fprintf(script, "cat $(OUTFILE)\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("var_redir_test.sh", 0755);
+    int result = system("./var_redir_test.sh > var_redir_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Variable in redirection test failed");
+    
+    char *output = read_file_content("var_redir_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read variable redirection test output");
+    ASSERT_TRUE(strstr(output, "variable redirection test") != NULL, "Variable expansion in redirection failed");
+    
+    // Check that the file was actually created
+    ASSERT_TRUE(access("var_test_output.txt", F_OK) == 0, "Output file was not created");
+    
+    free(output);
+    unlink("var_redir_test.sh");
+    unlink("var_redir_output.txt");
+    unlink("var_test_output.txt");
+    TEST_PASS();
+}
+
+void test_escaped_variable(void) {
+    TEST_START("Escaped variable (literal $)");
+    
+    FILE *script = fopen("escaped_var_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "export TESTVAR=should_not_expand\n");
+    fprintf(script, "echo \\$TESTVAR\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("escaped_var_test.sh", 0755);
+    int result = system("./escaped_var_test.sh > escaped_var_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Escaped variable test failed");
+    
+    char *output = read_file_content("escaped_var_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read escaped variable test output");
+    ASSERT_TRUE(strstr(output, "$TESTVAR") != NULL, "Variable was expanded when it should have been literal");
+    ASSERT_TRUE(strstr(output, "should_not_expand") == NULL, "Escaped variable was expanded");
+    
+    free(output);
+    unlink("escaped_var_test.sh");
+    unlink("escaped_var_output.txt");
+    TEST_PASS();
+}
+
+void test_undefined_variable(void) {
+    TEST_START("Undefined variable expansion");
+    
+    FILE *script = fopen("undef_var_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "echo before_$UNDEFINED_VAR_after\n");
+    fprintf(script, "echo test_$(UNDEFINED_VAR)_end\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+    
+    chmod("undef_var_test.sh", 0755);
+    int result = system("./undef_var_test.sh > undef_var_output.txt 2>&1");
+    
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Undefined variable test failed");
+    
+    char *output = read_file_content("undef_var_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read undefined variable test output");
+    // Undefined variables should expand to empty string
+    ASSERT_TRUE(strstr(output, "before__after") != NULL || strstr(output, "before_after") != NULL, 
+                "Undefined variable not handled correctly");
+    
+    free(output);
+    unlink("undef_var_test.sh");
+    unlink("undef_var_output.txt");
+    TEST_PASS();
+}
+
 void run_all_integration_tests(void) {
     printf("=== Running Integration Tests ===\n");
     printf("Note: These tests require the shell executable './mysh' to be present\n\n");
@@ -382,6 +579,14 @@ void run_all_integration_tests(void) {
     test_append_redirection();
     test_job_control();
     test_stress_multiple_pipes();
+    
+    // Variable expansion tests
+    test_env_variable_expansion();
+    test_local_variable_expansion();
+    test_variable_in_pipe();
+    test_variable_in_redirection();
+    test_escaped_variable();
+    test_undefined_variable();
     
     printf("\n=== Integration Test Results ===\n");
     printf("Passed: %d\n", test_result.passed);
