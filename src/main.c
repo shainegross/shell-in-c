@@ -74,8 +74,15 @@ int main() {
         }
         input[strcspn(input, "\n")] = 0;
 
-        printf("DEBUG: Raw input after getline: '%s'\n", input);
-        parse_input(input, pipeline, &input_has_background_process);        
+        parse_input(input, pipeline, &input_has_background_process);
+
+        // Debugging output
+        /*for (int k = 0; k <= pipeline->pipe_count; ++k) {
+            printf("DEBUG: command %d:", k);
+            for (int a = 0; pipeline->commands[k].argv[a]; ++a)
+                printf(" '%s'", pipeline->commands[k].argv[a]);
+            printf("\n");
+        }*/
         
         // Create pipes if needed (for pipe_count > 0, we need pipe_count pipes)
         if(pipeline->pipe_count > 0) {
@@ -165,13 +172,11 @@ int main() {
                 //char **child_env = environ;  // Use original environment for testing
                                 
                 // Identify path to executable
-                printf("DEBUG: Looking for command: '%s'\n", cmd->argv[0]);
                 char *full_path = find_executable_in_path(cmd->argv[0], &var_store);
                 if (full_path == NULL) {
                     fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
                     exit(127);
                 }
-                printf("DEBUG: Found full path: '%s'\n", full_path);
                 execve(full_path, cmd->argv, child_env);
     
                 fprintf(stderr, "%s: command not found\n", cmd->argv[0]);
