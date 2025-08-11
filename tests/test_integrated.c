@@ -559,6 +559,106 @@ void test_undefined_variable(void) {
     TEST_PASS();
 }
 
+void test_basic_history(void) {
+    TEST_START("Basic history storage");
+
+    FILE *script = fopen("history_basic_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "echo first_command\n");
+    fprintf(script, "echo second_command\n");
+    fprintf(script, "history\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+
+    chmod("history_basic_test.sh", 0755);
+    int result = system("./history_basic_test.sh > history_basic_output.txt 2>&1");
+
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Basic history command failed");
+
+    char *output = read_file_content("history_basic_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read basic history output");
+
+    ASSERT_TRUE(strstr(output, "1  echo first_command") != NULL, "First history entry missing");
+    ASSERT_TRUE(strstr(output, "2  echo second_command") != NULL, "Second history entry missing");
+
+    free(output);
+    unlink("history_basic_test.sh");
+    unlink("history_basic_output.txt");
+    TEST_PASS();
+}
+
+void test_history_repeat_last(void) {
+    TEST_START("Repeat last command with !!");
+
+    FILE *script = fopen("history_repeat_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "echo hello\n");
+    fprintf(script, "!!\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+
+    chmod("history_repeat_test.sh", 0755);
+    int result = system("./history_repeat_test.sh > history_repeat_output.txt 2>&1");
+
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "Repeat last (!!) command failed");
+
+    char *output = read_file_content("history_repeat_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read repeat history output");
+
+    int hello_count = 0;
+    char *pos = output;
+    while ((pos = strstr(pos, "hello")) != NULL) {
+        hello_count++;
+        pos++;
+    }
+    ASSERT_TRUE(hello_count >= 2, "!! did not repeat the last command");
+
+    free(output);
+    unlink("history_repeat_test.sh");
+    unlink("history_repeat_output.txt");
+    TEST_PASS();
+}
+
+void test_history_by_number(void) {
+    TEST_START("Repeat command by number (!n)");
+
+    FILE *script = fopen("history_number_test.sh", "w");
+    fprintf(script, "#!/bin/bash\n");
+    fprintf(script, "timeout 10 ./mysh << 'EOF'\n");
+    fprintf(script, "echo first\n");
+    fprintf(script, "echo second\n");
+    fprintf(script, "!1\n");
+    fprintf(script, "exit\n");
+    fprintf(script, "EOF\n");
+    fclose(script);
+
+    chmod("history_number_test.sh", 0755);
+    int result = system("./history_number_test.sh > history_number_output.txt 2>&1");
+
+    ASSERT_TRUE(WEXITSTATUS(result) == 0, "!n history command failed");
+
+    char *output = read_file_content("history_number_output.txt");
+    ASSERT_TRUE(output != NULL, "Could not read !n history output");
+
+    int first_count = 0;
+    char *pos = output;
+    while ((pos = strstr(pos, "first")) != NULL) {
+        first_count++;
+        pos++;
+    }
+    ASSERT_TRUE(first_count >= 2, "!1 did not repeat the first command");
+
+    free(output);
+    unlink("history_number_test.sh");
+    unlink("history_number_output.txt");
+    TEST_PASS();
+}
+
+
 void run_all_integration_tests(void) {
     printf("=== Running Integration Tests ===\n");
     printf("Note: These tests require the shell executable './mysh' to be present\n\n");

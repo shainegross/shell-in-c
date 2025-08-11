@@ -12,6 +12,8 @@
 #define REDIRECT_APP  0x04  // 0100
 
 #define VARS_EXCESS_CAPACITY 16 
+#define INIT_HISTORY 25
+#define MAX_HISTORY 100
 
 // Supports display_variables function
 #define DISPLAY_LOCAL 1
@@ -22,6 +24,7 @@
 extern const char *built_in_commands[];
 extern const char *job_commands[];
 
+// VARIABLE RELATED STRUCTS & VARIABLES
 // Structure for a single variable (can be local or exported)
 struct Variable {
     char *name;
@@ -42,7 +45,9 @@ struct VariableStore {
 extern char **environ;  // Original environment variables
 extern struct VariableStore var_store;     
 
-// Pipeline-related structures
+
+
+// PIPELINE RELATED STRUCTS
 struct Redirection {
     char input_file[MAX_INPUT_SIZE];    
     char output_file[MAX_INPUT_SIZE];   
@@ -60,7 +65,7 @@ struct Pipeline {
     int pipe_count;
 };
 
-//Job related structures
+//JOB RELATED STRUCTS & VARIABLES
 enum JobState {JOB_RUNNING, JOB_STOPPED, JOB_DONE };
 
 struct Job {
@@ -81,10 +86,30 @@ struct JobTable {
 
 extern struct JobTable job_table;
 
+// HISTORY RELATED STRUCT & VARIABLES
+struct HistoryTable {
+    char **input;            // Array of input strings
+    int count;                  // Number of input in history
+    int capacity;               // Capacity of the array
+    int current_index;         // Current index for adding new commands (circular buffer)
+    int navigate_index;  
+};
+
+extern struct HistoryTable history;
+
 // FUNCTION PROTOTYPES
 // built-ins.c
 struct Command *initialze_Command(struct Command *cmd); 
 int process_built_in_command(struct Command *cmd);
+
+//history.c
+int add_to_history(struct HistoryTable *history, const char *input);
+char *fetch_history_by_index (struct HistoryTable *h, int index);
+void free_history(struct HistoryTable *history);
+int init_history_table(struct HistoryTable *history);
+void print_all_history(struct HistoryTable *history);
+char *print_history_entry(struct HistoryTable *history, int index);
+void save_history(struct HistoryTable *history);
 
 // jobs.c
 int createJob(struct JobTable *table, char *input, int *is_background, pid_t *pids, int pid_count);
@@ -109,5 +134,7 @@ int set_variable(struct VariableStore *vs, const char *name, const char *value, 
 int unset_variable(struct VariableStore *vs, const char *name);
 
 // signals.c
+void save_and_exit(int signo);
 void sigchld_handler(int sig);
+
 

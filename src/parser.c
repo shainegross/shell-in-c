@@ -5,7 +5,7 @@
 #include "../include/shell.h"
 
 // FUNCTION PROTOTYPES
-char *expand_var(const char *input, struct VariableStore *var_store);
+char *expand(const char *input, struct VariableStore *var_store);
 int var_name_end(const char *s);
 
 
@@ -22,7 +22,11 @@ struct Command *initialze_Command(struct Command *cmd) {
 
 void parse_input(char *input, struct Pipeline *pipeline, int *input_has_background_process) {
 
-    char *input_expanded = expand_var(input, &var_store);
+    char *input_expanded = expand(input, &var_store);
+    if (input_expanded == NULL) {
+        fprintf(stderr, "Error expanding variables\n");
+        return;
+    }
 
     int argc = 0;
     char *token = strtok(input_expanded, " \t\n");
@@ -74,7 +78,7 @@ void parse_input(char *input, struct Pipeline *pipeline, int *input_has_backgrou
 
 // Takes user's full input and expands variables
 // If variable not found, returns user's input 
-char *expand_var(const char *input, struct VariableStore *var_store){
+char *expand(const char *input, struct VariableStore *var_store){
 
     size_t cap = 1024;
     char *out = malloc(cap);
@@ -82,7 +86,25 @@ char *expand_var(const char *input, struct VariableStore *var_store){
     char *marker = out;
 
     for (size_t i = 0; input[i] != '\0'; i++) {
-        if (input[i] == '\\' && input[i+1] == '$') {
+        // Handle history expansion
+        if (input[i] == '!' && (input[i+1] == '!' || isdigit(input[i+1]))) {
+            int index;
+            if (input[i+1] == '!') {
+                index = 1; // last command
+                i ++;
+            } else {
+                index = atoi(input + i + 1);
+                while (isdigit((unsigned char)input[i+1])) i++; 
+            }
+
+            char *history_entry = fetch_history_by_index(&history, index);
+            if (history_entry) {
+                size_t len = strlen(history_entry);
+                memcpy(marker, history_entry, len);
+                marker += len;
+            }
+            continue;
+        } else if (input[i] == '\\' && input[i+1] == '$') {
             // Escape sequence, just copy the next character
             *marker++ = '$';
             i++;
@@ -142,3 +164,4 @@ int var_name_end(const char *s) {
     while (isalnum((unsigned char)s[i]) || s[i] == '_') i++;
     return i; // index of first char after var name
 }
+

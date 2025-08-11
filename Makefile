@@ -11,7 +11,8 @@ SRCS = $(SRC_DIR)/main.c \
 	   $(SRC_DIR)/builtin.c \
 	   $(SRC_DIR)/jobs.c \
 	   $(SRC_DIR)/signals.c\
-	   $(SRC_DIR)/vars.c 
+	   $(SRC_DIR)/vars.c \
+	   $(SRC_DIR)/history.c
 
 CFLAGS = -Wall -I$(INC_DIR)
 DEBUG_CFLAGS = -Wall -I$(INC_DIR) -g -O0

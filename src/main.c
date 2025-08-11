@@ -25,6 +25,12 @@ int main() {
         return 1;
     }
     
+    // Initialize history
+    if(init_history_table(&history) < 0) {
+        fprintf(stderr, "Failed to initialize history table\n");
+        return 1;
+    }
+
     // Initialize JobTable
     job_table.job_count = 0;
     job_table.next_job_id = 1;
@@ -46,6 +52,15 @@ int main() {
         // Prevent background processes from writing and reading to terminal
         sigaction(SIGTTOU, &sa, NULL);  
         sigaction(SIGTTIN, &sa, NULL); 
+
+        // Save history and exit on termination signals
+        struct sigaction sa_save;
+        sa_save.sa_handler = save_and_exit;
+        sigemptyset(&sa_save.sa_mask);
+        sa_save.sa_flags = 0;
+
+        sigaction(SIGTERM, &sa_save, NULL);
+        sigaction(SIGHUP, &sa_save, NULL);
 
     while(1){
         // Cleanup finished jobs before processing new input
@@ -74,6 +89,7 @@ int main() {
         }
         input[strcspn(input, "\n")] = 0;
 
+        add_to_history(&history, input);
         parse_input(input, pipeline, &input_has_background_process);
 
         // Debugging output
@@ -200,6 +216,8 @@ int main() {
         
         // handle exit in outer loop
         if (should_exit) {
+            save_history(&history);  
+            free_history(&history);
             free(input);
             free(pipeline);
             break;

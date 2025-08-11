@@ -1,5 +1,6 @@
 #include "../include/shell.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -28,4 +29,11 @@ void sigchld_handler(int sig) {
         }
     next_pid:;
     }
+}
+
+// save history before exiting
+void save_and_exit(int signo) {
+    save_history(&history);
+    free_history(&history);
+    exit(128 + signo);  
 }
